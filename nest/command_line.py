@@ -420,9 +420,9 @@ def main():
         else:
             device = napi.thermostats[args.index]
 
-        if args.celsius and device.temperature_scale is 'F':
+        if args.celsius and device.temperature_scale == 'F':
             display_temp = utils.f_to_c
-        elif not args.celsius and device.temperature_scale is 'C':
+        elif not args.celsius and device.temperature_scale == 'C':
             display_temp = utils.c_to_f
 
         if cmd == 'temp':
