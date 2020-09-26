@@ -348,15 +348,15 @@ def main():
                   "--client-id and --client-secret.")
             return
 
-    with nest.Nest(client_id=args.client_id, client_secret=args.client_secret,
+    with nest.Nest(project_id=args.project_id, client_id=args.client_id,
+                   client_secret=args.client_secret,
                    access_token=args.token,
                    access_token_cache_file=token_cache) as napi:
-
         if napi.authorization_required:
             print('Go to ' + napi.authorize_url +
                   ' to authorize, then enter PIN below')
-            pin = input("PIN: ")
-            napi.request_token(pin)
+            authorization_code = input("Authorization Code: ")
+            napi.request_token(authorization_code)
 
         if cmd.startswith("camera"):
             return handle_camera_commands(napi, args)

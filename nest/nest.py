@@ -20,10 +20,9 @@ from requests.compat import json
 
 import sseclient
 
-ACCESS_TOKEN_URL = 'https://api.home.nest.com/oauth2/access_token'
-AUTHORIZE_URL = 'https://home.nest.com/login/oauth2?client_id={0}&state={1}'
-API_URL = 'https://developer-api.nest.com'
-LOGIN_URL = 'https://home.nest.com/user/login'
+ACCESS_TOKEN_URL = 'https://www.googleapis.com/oauth2/v4/token?redirect_uri=https://www.google.com'
+AUTHORIZE_URL = 'https://nestservices.google.com/partnerconnections/{project_id}/auth?redirect_uri=https://www.google.com&access_type=offline&prompt=consent&client_id={client_id}&response_type=code&scope=https://www.googleapis.com/auth/sdm.service'
+API_URL = 'https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}/'
 SIMULATOR_SNAPSHOT_URL = \
     'https://developer.nest.com' \
     '/simulator/api/v1/nest/devices/camera/snapshot'
@@ -159,10 +158,10 @@ class NestAuth(auth.AuthBase):
                                                          collections.Callable):
             self.auth_callback(res)
 
-    def login(self, headers=None):
+    def login(self, code, headers=None):
         data = {'client_id': self._client_id,
                 'client_secret': self._client_secret,
-                'code': self.pin,
+                'code': code,
                 'grant_type': 'authorization_code'}
 
         post = requests.post
@@ -1617,6 +1616,7 @@ class Nest(object):
                  access_token=None, access_token_cache_file=None,
                  local_time=False,
                  client_id=None, client_secret=None,
+                 project_id=None,
                  product_version=None):
         self._urls = {}
         self._limits = {}
@@ -1640,6 +1640,7 @@ class Nest(object):
         self._access_token = access_token
         self._client_id = client_id
         self._client_secret = client_secret
+        self._project_id = project_id
         self._product_version = product_version
 
         self._session = requests.Session()
@@ -1666,7 +1667,7 @@ class Nest(object):
     @property
     def invalid_access_token(self):
         try:
-            self._get("/")
+            self._get("/devices")
             return False
         except AuthorizationError:
             return True
@@ -1683,12 +1684,11 @@ class Nest(object):
 
     @property
     def authorize_url(self):
-        state = hashlib.md5(os.urandom(32)).hexdigest()
-        return AUTHORIZE_URL.format(self._client_id, state)
+        return AUTHORIZE_URL.format(project_id=self._project_id,
+            client_id=self._client_id)
 
-    def request_token(self, pin):
-        self._session.auth.pin = pin
-        self._session.auth.login()
+    def request_token(self, code):
+        self._session.auth.login(code)
 
     @property
     def access_token(self):
@@ -1732,8 +1732,13 @@ class Nest(object):
             _LOGGER.debug("<< %s", response.status_code)
         return response
 
+    @property
+    def api_url(self):
+        return API_URL.format(project_id=self._project_id)
+
+
     def _open_data_stream(self, path="/"):
-        url = "%s%s" % (API_URL, path)
+        url = "%s%s" % (self.api_url, path)
         _LOGGER.debug(">> STREAM %s", url)
 
         # Opens the data stream
@@ -1818,7 +1823,7 @@ class Nest(object):
             _LOGGER.info("Event loop stopped.")
 
     def _request(self, verb, path="/", data=None):
-        url = "%s%s" % (API_URL, path)
+        url = "%s%s" % (self.api_url, path)
         _LOGGER.debug(">> %s %s", verb, url)
 
         if data is not None:
