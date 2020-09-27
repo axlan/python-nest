@@ -22,7 +22,7 @@ import sseclient
 
 ACCESS_TOKEN_URL = 'https://www.googleapis.com/oauth2/v4/token?redirect_uri=https://www.google.com'
 AUTHORIZE_URL = 'https://nestservices.google.com/partnerconnections/{project_id}/auth?redirect_uri=https://www.google.com&access_type=offline&prompt=consent&client_id={client_id}&response_type=code&scope=https://www.googleapis.com/auth/sdm.service'
-API_URL = 'https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}/'
+API_URL = 'https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}'
 SIMULATOR_SNAPSHOT_URL = \
     'https://developer.nest.com' \
     '/simulator/api/v1/nest/devices/camera/snapshot'
