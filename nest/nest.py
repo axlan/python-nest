@@ -18,16 +18,14 @@ from requests import auth
 from requests import adapters
 from requests.compat import json
 
-import sseclient
+from requests_oauthlib import OAuth2Session
+from oauthlib.oauth2 import TokenExpiredError
 
-ACCESS_TOKEN_URL = 'https://www.googleapis.com/oauth2/v4/token?redirect_uri=https://www.google.com'
-AUTHORIZE_URL = 'https://nestservices.google.com/partnerconnections/{project_id}/auth?redirect_uri=https://www.google.com&access_type=offline&prompt=consent&client_id={client_id}&response_type=code&scope=https://www.googleapis.com/auth/sdm.service'
-API_URL = 'https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}'
-SIMULATOR_SNAPSHOT_URL = \
-    'https://developer.nest.com' \
-    '/simulator/api/v1/nest/devices/camera/snapshot'
-SIMULATOR_SNAPSHOT_PLACEHOLDER_URL = \
-    'https://media.giphy.com/media/WCwFvyeb6WJna/giphy.gif'
+ACCESS_TOKEN_URL = 'https://www.googleapis.com/oauth2/v4/token'
+AUTHORIZE_URL = 'https://nestservices.google.com/partnerconnections/{project_id}/auth'
+API_URL = 'https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}/devices'
+REDIRECT_URI = 'https://www.google.com'
+SCOPE = ['https://www.googleapis.com/auth/sdm.service']
 
 AWAY_MAP = {'on': 'away',
             'away': 'away',
@@ -48,10 +46,8 @@ FAN_MAP = {'auto on': False,
 
 LowHighTuple = collections.namedtuple('LowHighTuple', ('low', 'high'))
 
-DEVICES = 'devices'
-METADATA = 'metadata'
 STRUCTURES = 'structures'
-THERMOSTATS = 'thermostats'
+THERMOSTAT_TYPE = 'sdm.devices.types.THERMOSTAT'
 SMOKE_CO_ALARMS = 'smoke_co_alarms'
 CAMERAS = 'cameras'
 
@@ -77,7 +73,10 @@ class APIError(Exception):
 
         if response_content != b'':
             if isinstance(response, requests.Response):
-                message = response.json()['error']
+                try:
+                    message = response.json()['error']
+                except:
+                    message = response_content
         else:
             message = "API Error Occured"
 
@@ -116,103 +115,28 @@ class AuthorizationError(Exception):
 
         self.response = response
 
-
-class NestAuth(auth.AuthBase):
-    def __init__(self, auth_callback=None, session=None,
-                 client_id=None, client_secret=None,
-                 access_token=None, access_token_cache_file=None):
-        self._res = {}
-        self.auth_callback = auth_callback
-        self.pin = None
-        self._access_token_cache_file = access_token_cache_file
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._access_token = access_token
-
-        if (access_token_cache_file is not None and
-                access_token is None and
-                os.path.exists(access_token_cache_file)):
-            with open(access_token_cache_file, 'r') as f:
-                _LOGGER.debug("Load access token from %s",
-                              access_token_cache_file)
-                self._res = json.load(f)
-                self._callback(self._res)
-
-        if session is not None:
-            session = weakref.ref(session)
-
-        self._session = session
-        self._adapter = adapters.HTTPAdapter()
-
-    def _cache(self):
-        if self._access_token_cache_file is not None:
-            with os.fdopen(os.open(self._access_token_cache_file,
-                                   os.O_WRONLY | os.O_CREAT, 0o600),
-                           'w') as f:
-                _LOGGER.debug("Save access token to %s",
-                              self._access_token_cache_file)
-                json.dump(self._res, f)
-
-    def _callback(self, res):
-        if self.auth_callback is not None and isinstance(self.auth_callback,
-                                                         collections.Callable):
-            self.auth_callback(res)
-
-    def login(self, code, headers=None):
-        data = {'client_id': self._client_id,
-                'client_secret': self._client_secret,
-                'code': code,
-                'grant_type': 'authorization_code'}
-
-        post = requests.post
-
-        if self._session:
-            session = self._session()
-            post = session.post
-
-        _LOGGER.debug(">> POST %s", ACCESS_TOKEN_URL)
-        response = post(ACCESS_TOKEN_URL, data=data, headers=headers)
-        _LOGGER.debug("<< %s", response.status_code)
-        if response.status_code != 200:
-            raise AuthorizationError(response)
-        self._res = response.json()
-
-        self._cache()
-        self._callback(self._res)
-
-    @property
-    def access_token(self):
-        return self._res.get('access_token', self._access_token)
-
-    def __call__(self, r):
-        if self.access_token:
-            r.headers['Authorization'] = 'Bearer ' + self.access_token
-
-        return r
-
-
 class NestBase(object):
-    def __init__(self, serial, nest_api):
-        self._serial = serial
+    def __init__(self, name, nest_api):
+        self._name = name
         self._nest_api = nest_api
 
     def __str__(self):
         return '<%s: %s>' % (self.__class__.__name__, self._repr_name)
 
-    def _set(self, what, data):
-        path = '/%s/%s' % (what, self._serial)
+    def _set(self, data):
+        path = f'/{self.name}:executeCommand'
 
         response = self._nest_api._put(path=path, data=data)
 
         return response
 
     @property
-    def serial(self):
-        return self._serial
+    def name(self):
+        return self._name
 
     @property
     def _repr_name(self):
-        return self.serial
+        return self.name
 
 
 class Device(NestBase):
@@ -235,63 +159,6 @@ class Device(NestBase):
         return str(self._device)
 
     @property
-    def name(self):
-        return self._device.get('name')
-
-    @property
-    def name_long(self):
-        return self._device.get('name_long')
-
-    @property
-    def device_id(self):
-        return self._device.get('device_id')
-
-    @property
-    def online(self):
-        return self._device.get('is_online')
-
-    @property
-    def software_version(self):
-        return self._device.get('software_version')
-
-    @property
-    def structure(self):
-        if 'structure_id' in self._device:
-            return Structure(self._device['structure_id'],
-                             self._nest_api)
-        else:
-            return None
-
-    @property
-    def where(self):
-        if self.where_id is not None:
-            # This name isn't always present due to upstream bug in the API
-            # https://nestdevelopers.io/t/missing-where-name-from-some-devices/1202
-            if self.where_id in self.structure.wheres:
-                return self.structure.wheres[self.where_id]['name']
-            else:
-                return self.where_id
-
-    @property
-    def where_id(self):
-        return self._device.get('where_id')
-
-    @where.setter
-    def where(self, value):
-        value = value.lower()
-        ident = self.structure.wheres.get(value)
-
-        if ident is None:
-            self.structure.add_where(value)
-            ident = self.structure.wheres[value]
-
-        self._set('device', {'where_id': ident})
-
-    @property
-    def description(self):
-        return self._device.get('name_long')
-
-    @property
     def is_thermostat(self):
         return False
 
@@ -303,6 +170,10 @@ class Device(NestBase):
     def is_smoke_co_alarm(self):
         return False
 
+    @property
+    def where(self):
+        return self._device['parentRelations']['displayName']
+
 
 class Thermostat(Device):
     @property
@@ -311,391 +182,40 @@ class Thermostat(Device):
 
     @property
     def _device(self):
-        return self._devices.get(THERMOSTATS, {}).get(self._serial, {})
-
-    @property
-    def fan(self):
-        # FIXME confirm this is the same as old havac_fan_state
-        return self._device.get('fan_timer_active')
-
-    @fan.setter
-    def fan(self, value):
-        mapped_value = FAN_MAP.get(value, False)
-        if mapped_value is None:
-            raise ValueError("Only True and False supported")
-
-        self._set('devices/thermostats', {'fan_timer_active': mapped_value})
-
-    @property
-    def fan_timer(self):
-        return self._device.get('fan_timer_duration')
-
-    @fan_timer.setter
-    def fan_timer(self, value):
-        self._set('devices/thermostats', {'fan_timer_duration': value})
+        return next(device for device in self._devices if device['name'] == self.name)
 
     @property
     def humidity(self):
-        return self._device.get('humidity')
+        return self._device['traits']['sdm.devices.traits.Humidity']['ambientHumidityPercent']
 
     @property
     def mode(self):
-        # FIXME confirm same as target_temperature_type
-        return self._device.get('hvac_mode')
-
-    @mode.setter
-    def mode(self, value):
-        self._set('devices/thermostats', {'hvac_mode': value.lower()})
-
-    @property
-    def has_leaf(self):
-        return self._device.get('has_leaf')
-
-    @property
-    def is_using_emergency_heat(self):
-        return self._device.get('is_using_emergency_heat')
-
-    @property
-    def label(self):
-        return self._device.get('label')
-
-    @property
-    def last_connection(self):
-        # TODO confirm this does get set, or if the API documentation is wrong
-        return self._device.get('last_connection')
-
-    @property
-    def postal_code(self):
-        return self.structure.postal_code
-
-    def _temp_key(self, key):
-        return "%s_%s" % (key, self.temperature_scale.lower())
-
-    def _round_temp(self, temp):
-        if self.temperature_scale == 'C':
-            return round(temp * 2) / 2
-        else:
-            # F goes to nearest degree
-            return int(round(temp))
+        return self._device['traits']['sdm.devices.traits.ThermostatMode']['mode']
 
     @property
     def temperature_scale(self):
-        return self._device.get('temperature_scale')
-
-    @temperature_scale.setter
-    def temperature_scale(self, value):
-        self._set('devices/thermostats', {'temperature_scale': value.upper()})
-
-    @property
-    def is_locked(self):
-        return self._device.get('is_locked')
-
-    @property
-    def locked_temperature(self):
-        low = self._device.get(self._temp_key('locked_temp_min'))
-        high = self._device.get(self._temp_key('locked_temp_max'))
-        return LowHighTuple(low, high)
+        return self._device['traits']['sdm.devices.traits.Settings']['temperatureScale']
 
     @property
     def temperature(self):
-        return self._device.get(self._temp_key('ambient_temperature'))
-
-    @property
-    def min_temperature(self):
-        if self.is_locked:
-            return self.locked_temperature[0]
-        else:
-            if self.temperature_scale == 'C':
-                return MINIMUM_TEMPERATURE_C
-            else:
-                return MINIMUM_TEMPERATURE_F
-
-    @property
-    def max_temperature(self):
-        if self.is_locked:
-            return self.locked_temperature[1]
-        else:
-            if self.temperature_scale == 'C':
-                return MAXIMUM_TEMPERATURE_C
-            else:
-                return MAXIMUM_TEMPERATURE_F
-
-    @temperature.setter
-    def temperature(self, value):
-        self.target = value
-
-    @property
-    def target(self):
-        if self.mode == 'heat-cool':
-            low = self._device.get(self._temp_key('target_temperature_low'))
-            high = self._device.get(self._temp_key('target_temperature_high'))
-            return LowHighTuple(low, high)
-
-        return self._device.get(self._temp_key('target_temperature'))
-
-    @target.setter
-    def target(self, value):
-        data = {}
-
-        if self.mode == 'heat-cool':
-            rounded_low = self._round_temp(value[0])
-            rounded_high = self._round_temp(value[1])
-
-            data[self._temp_key('target_temperature_low')] = rounded_low
-            data[self._temp_key('target_temperature_high')] = rounded_high
-        else:
-            rounded_temp = self._round_temp(value)
-            data[self._temp_key('target_temperature')] = rounded_temp
-
-        self._set('devices/thermostats', data)
-
-    @property
-    def eco_temperature(self):
-        # use get, since eco_temperature isn't always filled out
-        low = self._device.get(self._temp_key('eco_temperature_low'))
-        high = self._device.get(self._temp_key('eco_temperature_high'))
-
-        return LowHighTuple(low, high)
-
-    @eco_temperature.setter
-    def eco_temperature(self, value):
-        low, high = value
-        data = {}
-
-        if low is not None:
-            data[self._temp_key('eco_temperature_low')] = low
-
-        if high is not None:
-            data[self._temp_key('eco_temperature_high')] = high
-
-        self._set('devices/thermostats', data)
-
-    @property
-    def can_heat(self):
-        return self._device.get('can_heat')
-
-    @property
-    def can_cool(self):
-        return self._device.get('can_cool')
-
-    @property
-    def has_humidifier(self):
-        return self._device.get('has_humidifier')
-
-    @property
-    def has_dehumidifier(self):
-        return self._device.get('has_dehumidifier')
-
-    @property
-    def has_fan(self):
-        return self._device.get('has_fan')
-
-    @property
-    def has_hot_water_control(self):
-        return self._device.get('has_hot_water_control')
-
-    @property
-    def hot_water_temperature(self):
-        return self._device.get('hot_water_temperature')
+        return self._device['traits']['sdm.devices.traits.Temperature']['ambientTemperatureCelsius']
 
     @property
     def hvac_state(self):
-        return self._device.get('hvac_state')
+        return self._device['traits']['sdm.devices.traits.ThermostatHvac']['status']
 
     @property
-    def previous_mode(self):
-        return self._device.get('previous_hvac_mode')
+    def heat_setpoint(self):
+        return self._device['traits']['sdm.devices.traits.ThermostatTemperatureSetpoint']['heatCelsius']
 
-    @property
-    def time_to_target(self):
-        return self._device.get('time_to_target')
-
-    @property
-    def time_to_target_training(self):
-        return self._device.get('time_to_target_training')
-
-
-class SmokeCoAlarm(Device):
-    @property
-    def is_smoke_co_alarm(self):
-        return True
-
-    @property
-    def _device(self):
-        return self._devices.get(SMOKE_CO_ALARMS, {}).get(self._serial, {})
-
-    @property
-    def battery_health(self):
-        return self._device.get('battery_health')
-
-    @property
-    def co_status(self):
-        # TODO deprecate for new name
-        return self._device.get('co_alarm_state')
-
-    @property
-    def color_status(self):
-        return self._device.get('ui_color_state')
-
-    @property
-    def latest_manual_test_start_utc_secs(self):
-        # TODO confirm units, deprecate for new method name
-        return self._device.get('last_manual_test_time')
-
-    @property
-    def last_manual_test_time(self):
-        # TODO parse time, check that it's in the dict
-        return self._device.get('last_manual_test_time')
-
-    @property
-    def product_id(self):
-        return self._device.get('product_id')
-
-    @property
-    def smoke_sequence_number(self):
-        return self._device.get('smoke_sequence_number')
-
-    @property
-    def smoke_status(self):
-        return self._device.get('smoke_alarm_state')
-
-
-class ActivityZone(NestBase):
-    def __init__(self, camera, zone_id):
-        self.camera = camera
-        NestBase.__init__(self, camera.serial, camera._nest_api)
-        # camera's activity_zone dict has int, but an event's list of
-        # activity_zone ids is strings `\/0_0\/`
-        self._zone_id = int(zone_id)
-
-    @property
-    def _camera(self):
-        return self.camera._device
-
-    @property
-    def _repr_name(self):
-        return self.name
-
-    @property
-    def _activity_zone(self):
-        return next(
-            z for z in self._camera.get('activity_zones')
-            if z['id'] == self.zone_id)
-
-    @property
-    def zone_id(self):
-        return self._zone_id
-
-    @property
-    def name(self):
-        return self._activity_zone.get('name')
-
-
-class CameraEvent(NestBase):
-    def __init__(self, camera):
-        NestBase.__init__(self, camera.serial, camera._nest_api)
-        self.camera = camera
-
-    @property
-    def _camera(self):
-        return self.camera._device
-
-    @property
-    def _event(self):
-        return self._camera.get('last_event')
-
-    def __str__(self):
-        return '<%s>' % (self.__class__.__name__)
-
-    def __repr__(self):
-        return str(self._event)
-
-    def activity_in_zone(self, zone_id):
-        if 'activity_zone_ids' in self._event:
-            return str(zone_id) in self._event['activity_zone_ids']
-        return False
-
-    @property
-    def activity_zones(self):
-        if 'activity_zone_ids' in self._event:
-            return [ActivityZone(self, z)
-                    for z in self._event['activity_zone_ids']]
-
-    @property
-    def animated_image_url(self):
-        return self._event.get('animated_image_url')
-
-    @property
-    def app_url(self):
-        return self._event.get('app_url')
-
-    @property
-    def has_motion(self):
-        return self._event.get('has_motion')
-
-    @property
-    def has_person(self):
-        return self._event.get('has_person')
-
-    @property
-    def has_sound(self):
-        return self._event.get('has_sound')
-
-    @property
-    def image_url(self):
-        return self._event.get('image_url')
-
-    @property
-    def start_time(self):
-        if 'start_time' in self._event:
-            return parse_time(self._event['start_time'])
-
-    @property
-    def end_time(self):
-        if 'end_time' in self._event:
-            end_time = parse_time(self._event['end_time'])
-            if end_time:
-                return end_time + datetime.timedelta(seconds=30)
-
-    @property
-    def urls_expire_time(self):
-        if 'urls_expire_time' in self._event:
-            return parse_time(self._event['urls_expire_time'])
-
-    @property
-    def web_url(self):
-        return self._event.get('web_url')
-
-    @property
-    def is_ongoing(self):
-        if self.end_time is not None:
-            # sometimes, existing event is updated with a new start time
-            # that's before the end_time which implies something new
-            if self.start_time > self.end_time:
-                return True
-
-            now = datetime.datetime.now(self.end_time.tzinfo)
-            # end time should be in the past
-            return self.end_time > now
-        # no end_time implies it's ongoing
-        return True
-
-    def has_ongoing_motion_in_zone(self, zone_id):
-        if self.is_ongoing and self.has_motion:
-            return self.activity_in_zone(zone_id)
-
-    def has_ongoing_sound(self):
-        if self.is_ongoing:
-            return self.has_sound
-
-    def has_ongoing_motion(self):
-        if self.is_ongoing:
-            return self.has_motion
-
-    def has_ongoing_person(self):
-        if self.is_ongoing:
-            return self.has_person
-
+    @heat_setpoint.setter
+    def heat_setpoint(self, value):
+        self._set({
+                    "command" : "sdm.devices.commands.ThermostatMode.SetHeat",
+                    "params" : {
+                        "heatCelsius" : value
+                    }
+                })
 
 class Camera(Device):
     @property
@@ -780,497 +300,122 @@ class Camera(Device):
     def web_url(self):
         return self._device.get('web_url')
 
-
-class Structure(NestBase):
-    @property
-    def _structure(self):
-        return self._nest_api._status.get(
-            STRUCTURES, {}).get(self._serial, {})
-
-    def __repr__(self):
-        return str(self._structure)
-
-    def _set_away(self, value, auto_away=False):
-        self._set('structures', {'away': AWAY_MAP[value]})
-
-    @property
-    def away(self):
-        return self._structure.get('away')
-
-    @away.setter
-    def away(self, value):
-        self._set_away(value)
-
-    @property
-    def country_code(self):
-        return self._structure.get('country_code')
-
-    @property
-    def thermostats(self):
-        if THERMOSTATS in self._structure:
-            return [Thermostat(devid, self._nest_api)
-                    for devid in self._structure[THERMOSTATS]]
-        else:
-            return []
-
-    @property
-    def smoke_co_alarms(self):
-        if SMOKE_CO_ALARMS in self._structure:
-            return [SmokeCoAlarm(devid, self._nest_api)
-                    for devid in self._structure[SMOKE_CO_ALARMS]]
-        else:
-            return []
-
-    @property
-    def cameras(self):
-        if CAMERAS in self._structure:
-            return [Camera(devid, self._nest_api)
-                    for devid in self._structure[CAMERAS]]
-        else:
-            return []
-
-   @property
-    def name(self):
-        return self._structure['name']
-
-    @name.setter
-    def name(self, value):
-        self._set('structures', {'name': value})
-
-    @property
-    def num_thermostats(self):
-        if THERMOSTATS in self._structure:
-            return len(self._structure[THERMOSTATS])
-        else:
-            return 0
-
-    @property
-    def num_cameras(self):
-        if CAMERAS in self._structure:
-            return len(self._structure[CAMERAS])
-        else:
-            return 0
-
-    @property
-    def num_smokecoalarms(self):
-        if SMOKE_CO_ALARMS in self._structure:
-            return len(self._structure[SMOKE_CO_ALARMS])
-        else:
-            return 0
-
-    @property
-    def time_zone(self):
-        return self._structure.get('time_zone')
-
-    @property
-    def peak_period_start_time(self):
-        if 'peak_period_start_time' in self._structure:
-            return parse_time(self._structure['peak_period_start_time'])
-
-    @property
-    def peak_period_end_time(self):
-        if 'peak_period_end_time' in self._structure:
-            return parse_time(self._structure['peak_period_end_time'])
-
-    @property
-    def eta_begin(self):
-        if 'eta_begin' in self._structure:
-            return parse_time(self._structure['eta_begin'])
-
-    def _set_eta(self, trip_id, eta_begin, eta_end):
-        if self.num_thermostats == 0:
-            raise ValueError("ETA can only be set or cancelled when a"
-                             " thermostat is in the structure.")
-        if trip_id is None:
-            raise ValueError("trip_id must be not None")
-
-        data = {'trip_id': trip_id,
-                'estimated_arrival_window_begin': eta_begin,
-                'estimated_arrival_window_end': eta_end}
-
-        self._set('structures', {'eta': data})
-
-    def set_eta(self, trip_id, eta_begin, eta_end=None):
-        """
-        Set estimated arrival winow, use same trip_id to update estimation.
-        Nest may choose to ignore inaccurate estimation.
-        See: https://developers.nest.com/documentation/cloud/away-guide
-             #make_an_eta_write_call
-        """
-        if eta_begin is None:
-            raise ValueError("eta_begin must be not None")
-        if eta_end is None:
-            eta_end = eta_begin + datetime.timedelta(minutes=1)
-
-        self._set_eta(trip_id, eta_begin.isoformat(), eta_end.isoformat())
-
-    def cancel_eta(self, trip_id):
-        """
-        Cancel estimated arrival winow.
-        """
-        eta_end = datetime.datetime.utcnow()
-        self._set_eta(trip_id, int(0), eta_end.isoformat())
-
-    @property
-    def wheres(self):
-        return self._structure.get('wheres')
-
-    @wheres.setter
-    def wheres(self, value):
-        self._set('where', {'wheres': value})
-
-    def add_where(self, name, ident=None):
-        name = name.lower()
-
-        if name in self.wheres:
-            return self.wheres[name]
-
-        name = ' '.join([n.capitalize() for n in name.split()])
-        wheres = copy.copy(self.wheres)
-
-        if ident is None:
-            ident = str(uuid.uuid4())
-
-        wheres.append({'name': name, 'where_id': ident})
-        self.wheres = wheres
-
-        return self.add_where(name)
-
-    def remove_where(self, name):
-        name = name.lower()
-
-        if name not in self.wheres:
-            return None
-
-        ident = self.wheres[name]
-
-        wheres = [w for w in copy.copy(self.wheres)
-                  if w['name'] != name and w['where_id'] != ident]
-
-        self.wheres = wheres
-        return ident
-
-    @property
-    def security_state(self):
-        """
-        Return 'ok' or 'deter'. Need sercurity state ready permission.
-        Note: this is NOT for Net Secruity alarm system.
-        See https://developers.nest.com/documentation/cloud/security-guide
-        """
-        return self._structure.get('wwn_security_state')
-
-
 class Nest(object):
-    def __init__(self, username=None, password=None,
-                 user_agent=None,
-                 access_token=None, access_token_cache_file=None,
-                 local_time=False,
+    def __init__(self,
                  client_id=None, client_secret=None,
+                 access_token=None, access_token_cache_file=None,
                  project_id=None,
-                 product_version=None):
-        self._urls = {}
-        self._limits = {}
-        self._user = None
-        self._userid = None
-        self._weave = None
-        self._staff = False
-        self._superuser = False
-        self._email = None
-        self._queue = collections.deque(maxlen=2)
-        self._event_thread = None
-        self._update_event = threading.Event()
-        self._queue_lock = threading.Lock()
-
-        if local_time:
-            raise ValueError("local_time no longer supported")
-
-        if user_agent:
-            raise ValueError("user_agent no longer supported")
-
-        self._access_token = access_token
+                 reautherize_callback=None,
+                 cache_period=1000):
         self._client_id = client_id
         self._client_secret = client_secret
         self._project_id = project_id
-        self._product_version = product_version
+        self._cache_period = cache_period
+        self._access_token_cache_file = access_token_cache_file
+        self._reautherize_callback = reautherize_callback
+        self._last_update = 0
+        self._client = None
+        self._devices_value = {}
 
-        self._session = requests.Session()
-        auth = NestAuth(client_id=self._client_id,
-                        client_secret=self._client_secret,
-                        session=self._session, access_token=access_token,
-                        access_token_cache_file=access_token_cache_file)
-        self._session.auth = auth
-
-    @property
-    def update_event(self):
-        return self._update_event
-
-    @property
-    def authorization_required(self):
-        return self.never_authorized or \
-            self.invalid_access_token or \
-            self.client_version_out_of_date
-
-    @property
-    def never_authorized(self):
-        return self.access_token is None
-
-    @property
-    def invalid_access_token(self):
-        try:
-            self._get("/devices")
-            return False
-        except AuthorizationError:
-            return True
-
-    @property
-    def client_version_out_of_date(self):
-        if self._product_version is not None:
-            try:
-                return self.client_version < self._product_version
-            # an error means they need to authorize anyways
-            except AuthorizationError:
-                return True
-        return False
-
-    @property
-    def authorize_url(self):
-        return AUTHORIZE_URL.format(project_id=self._project_id,
-            client_id=self._client_id)
-
-    def request_token(self, code):
-        self._session.auth.login(code)
-
-    @property
-    def access_token(self):
-        return self._access_token or self._session.auth.access_token
-
-    def _handle_ratelimit(self, res, verb, url, data,
-                          max_retries=10, default_wait=5,
-                          stream=False, headers=None):
-        response = res
-        retries = 0
-        while response.status_code == 429 and retries <= max_retries:
-            retries += 1
-            retry_after = response.headers.get('Retry-After')
-            _LOGGER.info("Reach rate limit, retry (%d), after %s",
-                         retries, retry_after)
-            # Default Retry Time
-            wait = default_wait
-
-            if retry_after is not None:
+        if not access_token:
                 try:
-                    # Checks if retry_after is a number
-                    wait = float(retry_after)
-                except ValueError:
-                    # If not:
-                    try:
-                        # Checks if retry_after is a HTTP date
-                        now = datetime.datetime.now()
-                        wait = (now - parse_time(retry_after)).total_seconds()
-                    except ValueError:
-                        # Use default
-                        pass
+                    with open(self._access_token_cache_file, 'r') as fd:
+                        access_token = json.load(fd)
+                        _LOGGER.debug("Loaded access token from %s",
+                                self._access_token_cache_file)
+                except:
+                    _LOGGER.warn("Token load failed from %s",
+                                self._access_token_cache_file)
+        if access_token:
+            self._client = OAuth2Session(self._client_id, token=access_token)
 
-            _LOGGER.debug("Wait %d seconds.", wait)
-            time.sleep(wait)
-            _LOGGER.debug(">> %s %s", 'STREAM' if stream else verb, url)
-            response = self._session.request(verb, url,
-                                             allow_redirects=False,
-                                             stream=stream,
-                                             headers=headers,
-                                             data=data)
-            _LOGGER.debug("<< %s", response.status_code)
-        return response
+    def __save_token(self, token):
+        with open(self._access_token_cache_file, 'w') as fd:
+            json.dump(token, fd)
+            _LOGGER.debug("Save access token to %s",
+                              self._access_token_cache_file)
+
+    def __reauthorize(self):
+        if self._reautherize_callback is None:
+            raise AuthorizationError(None, 'No callback to handle OAuth URL')
+        self._client = OAuth2Session(self._client_id, redirect_uri=REDIRECT_URI, scope=SCOPE)
+
+        authorization_url, state = self._client.authorization_url(
+            AUTHORIZE_URL.format(self.project_id),
+            # access_type and prompt are Google specific extra
+            # parameters.
+            access_type="offline", prompt="consent")
+        
+        authorization_response = self._reautherize_callback(authorization_url)
+        _LOGGER.debug(">> fetch_token")
+        token = self._client.fetch_token(
+            ACCESS_TOKEN_URL,
+            authorization_response=authorization_response,
+            # Google specific extra parameter used for client
+            # authentication
+            client_secret=self._client_secret)
+        self.__save_token(token)
+
+    def _request(self, verb, path, data=None):
+        url = self.api_url + path
+        if data is not None:
+            data = json.dumps(data)
+        attempt = 0
+        while True:
+            attempt += 1
+            if self._client:
+                try:
+                    _LOGGER.debug(">> %s %s", verb, url)
+                    r = self._client.request(verb, url,
+                                         allow_redirects=False,
+                                         data=data)
+                    _LOGGER.debug(f"<< {r.status_code}")
+                    if r.status_code == 200:
+                        return r.json()
+                    if r.status_code != 401:
+                        raise APIError(r)
+                except TokenExpiredError as e:
+                    # most providers will ask you for extra credentials to be passed along
+                    # when refreshing tokens, usually for authentication purposes.
+                    extra = {
+                        'client_id': self._client_id,
+                        'client_secret': self._client_secret,
+                    }
+                    _LOGGER.debug(">> refreshing token")
+                    token = self._client.refresh_token(ACCESS_TOKEN_URL, **extra)
+                    self.__save_token(token)
+                    if attempt > 1:
+                        raise AuthorizationError(None, 'Repeated TokenExpiredError')
+                    continue
+            self.__reauthorize()
+    
+    def _put(self, path, data=None):
+        pieces = path.split('/')
+        path = '/' + pieces[-1]
+        return self._request('POST', path, data=data)
 
     @property
     def api_url(self):
         return API_URL.format(project_id=self._project_id)
 
-
-    def _open_data_stream(self, path="/"):
-        url = "%s%s" % (self.api_url, path)
-        _LOGGER.debug(">> STREAM %s", url)
-
-        # Opens the data stream
-        headers = {'Accept': 'text/event-stream'}
-        # Set Connection Timeout to 30 seconds
-        # Set Read Timeout to 5 mintues, Nest Stream API will send
-        #  keep alive event every 30 seconds, 5 mintues is long enough
-        #  for us to belive network issue occurred
-        response = self._session.get(url, stream=True, headers=headers,
-                                     allow_redirects=False,
-                                     timeout=(30, 300))
-
-        _LOGGER.debug("<< %s", response.status_code)
-        if response.status_code == 401:
-            raise AuthorizationError(response)
-
-        if response.status_code == 429:
-            response = self._handle_ratelimit(response, 'GET', url, None,
-                                              max_retries=10,
-                                              default_wait=5,
-                                              stream=True,
-                                              headers=headers)
-
-        if response.status_code == 307:
-            redirect_url = response.headers['Location']
-            _LOGGER.debug(">> STREAM %s", redirect_url)
-            # For stream API, we have to deal redirect manually
-            response = self._session.get(redirect_url,
-                                         allow_redirects=False,
-                                         headers=headers,
-                                         stream=True,
-                                         timeout=(30, 300))
-            _LOGGER.debug("<< %s", response.status_code)
-            if response.status_code == 429:
-                response = self._handle_ratelimit(response, 'GET', url, None,
-                                                  max_retries=10,
-                                                  default_wait=5,
-                                                  stream=True,
-                                                  headers=headers)
-
-        ready_event = threading.Event()
-        self._event_thread = threading.Thread(target=self._start_event_loop,
-                                              args=(response,
-                                                    self._queue,
-                                                    ready_event,
-                                                    self._update_event))
-        self._event_thread.setDaemon(True)
-        self._event_thread.start()
-        ready_event.wait(timeout=10)
-        _LOGGER.info("Event loop started.")
-
-    def _start_event_loop(self, response, queue, ready_event, update_event):
-        _LOGGER.debug("Starting event loop.")
-        try:
-            client = sseclient.SSEClient(response.iter_content())
-            for event in client.events():
-                event_type = event.event
-                _LOGGER.debug("<<< %s event", event_type)
-                if event_type == 'open' or event_type == 'keep-alive':
-                    pass
-                elif event_type == 'put':
-                    queue.appendleft(json.loads(event.data))
-                    update_event.set()
-                elif event_type == 'auth_revoked':
-                    raise AuthorizationError(None,
-                                             msg='Auth token has been revoked')
-                elif event_type == 'error':
-                    raise APIError(None, msg=event.data)
-
-                if not ready_event.is_set():
-                    ready_event.set()
-        except requests.exceptions.ConnectionError:
-            _LOGGER.warning("Haven't received data from Nest in 5 mintues")
-        finally:
-            _LOGGER.debug("Stopping event loop.")
-            queue.clear()
-            update_event.set()
-            try:
-                response.close()
-            except Exception:
-                pass
-            _LOGGER.info("Event loop stopped.")
-
-    def _request(self, verb, path="/", data=None):
-        url = "%s%s" % (self.api_url, path)
-        _LOGGER.debug(">> %s %s", verb, url)
-
-        if data is not None:
-            data = json.dumps(data)
-
-        response = self._session.request(verb, url,
-                                         allow_redirects=False,
-                                         data=data)
-        _LOGGER.debug("<< %s", response.status_code)
-        if response.status_code == 200:
-            return response.json()
-
-        if response.status_code == 401:
-            raise AuthorizationError(response)
-
-        # Rate Limit Exceeded Catch
-        if response.status_code == 429:
-            response = self._handle_ratelimit(response, verb, url, data,
-                                              max_retries=10,
-                                              default_wait=5)
-
-            # Prevent this from catching as APIError
-            if response.status_code == 200:
-                return response.json()
-
-        # This will handle the error if max_retries is exceeded
-        if response.status_code != 307:
-            raise APIError(response)
-
-        redirect_url = response.headers['Location']
-        _LOGGER.debug(">> %s %s", verb, redirect_url)
-        response = self._session.request(verb, redirect_url,
-                                         allow_redirects=False,
-                                         data=data)
-
-        _LOGGER.debug("<< %s", response.status_code)
-        # Rate Limit Exceeded Catch
-        if response.status_code == 429:
-            response = self._handle_ratelimit(response, verb, redirect_url,
-                                              data, max_retries=10,
-                                              default_wait=5)
-
-        # This will handle the error if max_retries is exceeded
-        if 400 <= response.status_code < 600:
-            raise APIError(response)
-
-        return response.json()
-
-    def _get(self, path="/"):
-        return self._request('GET', path)
-
-    def _put(self, path="/", data=None):
-        return self._request('PUT', path, data=data)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return False
-
     @property
-    def _status(self):
-        self._queue_lock.acquire()
-        if len(self._queue) == 0 or not self._queue[0]:
+    def _devices(self):
+        if time.time() > self._last_update + self._cache_period:
             try:
-                _LOGGER.info("Open data stream")
-                self._open_data_stream("/")
-            except AuthorizationError as authorization_error:
-                self._queue_lock.release()
-                raise authorization_error
+                self._devices_value = self._request('GET', '')['devices']
+                self._last_update = time.time()
             except Exception as error:
                 # other error still set update_event to trigger retry
                 _LOGGER.debug("Exception occurred in processing stream:"
                               " %s", error)
-                self._queue.clear()
-                self._update_event.set()
-        self._queue_lock.release()
-
-        value = self._queue[0]['data'] if len(self._queue) > 0 else {}
-        return value
-
-    @property
-    def _metadata(self):
-        return self._status.get(METADATA, {})
-
-    @property
-    def client_version(self):
-        return self._metadata.get('client_version')
-
-    @property
-    def _devices(self):
-        return self._status.get(DEVICES, {})
+        return self._devices_value
 
     @property
     def thermostats(self):
-        return [Thermostat(devid, self)
-                for devid in self._devices.get(THERMOSTATS, [])]
+        names = [ device['name'] for device in 
+            self._devices if device['type'] == THERMOSTAT_TYPE
+        ]
+        return [Thermostat(name, self) for name in names]
 
     @property
     def smoke_co_alarms(self):
@@ -1286,3 +431,9 @@ class Nest(object):
     def structures(self):
         return [Structure(stid, self)
                 for stid in self._status.get(STRUCTURES, [])]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False

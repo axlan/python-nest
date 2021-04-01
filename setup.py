@@ -11,18 +11,18 @@ from setuptools import setup
 #                Bumping Minor means API bugfix or new functionality.
 #                Bumping Micro means CLI change of any kind unless it is
 #                    significant enough to warrant a minor/major bump.
-version = '4.1.0'
+version = '5.0.0'
 
 
-setup(name='python-nest',
+setup(name='python-google-nest',
       version=version,
       description='Python API and command line tool for talking to the '
-                  'Nest™ Thermostat',
-      long_description=io.open('README.rst', encoding='UTF-8').read(),
+                  'Nest™ Thermostat through new Google API',
+      long_description=io.open('README.md', encoding='UTF-8').read(),
       keywords='nest thermostat',
-      author='Jason Kölker',
-      author_email='jason@koelker.net',
-      url='https://github.com/jkoelker/python-nest/',
+      author='Jonathan Diamond',
+      author_email='feros32@gmail.com',
+      url='https://github.com/axlan/python-nest/',
       packages=['nest'],
       install_requires=['requests>=1.0.0',
                         'six>=1.10.0',

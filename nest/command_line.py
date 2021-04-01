@@ -299,6 +299,10 @@ def handle_show_commands(napi, device, display_temp, print_prompt,
         print('Press Ctrl+C to EXIT')
 
 
+def reautherize_callback(authorization_url):
+        print('Please go to %s and authorize access.' % authorization_url)
+        return input('Enter the full callback URL: ')
+
 def main():
     parser = get_parser()
     args = parser.parse_args()
@@ -351,12 +355,8 @@ def main():
     with nest.Nest(project_id=args.project_id, client_id=args.client_id,
                    client_secret=args.client_secret,
                    access_token=args.token,
-                   access_token_cache_file=token_cache) as napi:
-        if napi.authorization_required:
-            print('Go to ' + napi.authorize_url +
-                  ' to authorize, then enter PIN below')
-            authorization_code = input("Authorization Code: ")
-            napi.request_token(authorization_code)
+                   access_token_cache_file=token_cache,
+                   reautherize_callback=reautherize_callback) as napi:
 
         if cmd.startswith("camera"):
             return handle_camera_commands(napi, args)
@@ -420,21 +420,13 @@ def main():
         else:
             device = napi.thermostats[args.index]
 
-        if args.celsius and device.temperature_scale == 'F':
-            display_temp = utils.f_to_c
-        elif not args.celsius and device.temperature_scale == 'C':
+
+        if not args.celsius:
             display_temp = utils.c_to_f
 
         if cmd == 'temp':
             if args.temperature:
-                if len(args.temperature) > 1:
-                    if device.mode != 'range':
-                        device.mode = 'range'
-
-                    device.temperature = args.temperature
-
-                else:
-                    device.temperature = args.temperature[0]
+                device.heat_setpoint = args.temperature[0]
 
             print('%0.1f' % display_temp(device.temperature))
 

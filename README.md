@@ -1,65 +1,49 @@
-=========================================================
-Python API and command line tool for the Nest™ Thermostat
-=========================================================
+# Python API and command line tool for the Nest™ Thermostat
 
+TODO: Fix build check
 .. image:: https://travis-ci.org/jkoelker/python-nest.svg?branch=master
     :target: https://travis-ci.org/jkoelker/python-nest
 
+**NOTE: This library support the new (post 2020) API provided by Google which replaced the original Nest Developers API.**
 
-Installation
-============
+## Installation
 
-.. code-block:: bash
+```bash
+    [sudo] pip install python-google-nest
+```
 
-    [sudo] pip install python-nest
+## Google Device Access Registration
 
+This is a fairly onerous process, so make sure to read the details before you begin.
 
-*NOTE* The ``4.x`` version uses the streaming endpoint. To use the older
-polling/caching behavior pin your requirements to ``python-nest<4.0``.
+The biggest roadblock is that access to this API requires registering with Google for Device Access <https://developers.google.com/nest/device-access/registration>. This has a one time $5 fee.
 
-*NOTE* The ``3.x`` version uses the Nest official api. As such, some functionality
-was removed as it is not available. To keep the old version and functionality, make sure to set
-your requirements to ``python-nest<3.0``.
+The documentation <https://developers.google.com/nest/device-access/get-started> walks you through the rest of the process.
 
-Nest Developer Account
-=======================
+At a high level it involves:
 
+1. Making sure your Nest devices are linked to your Google account
+2. Set up GCP (Google Cloud Platform) account <https://console.cloud.google.com/>
+3. Set up a new GCP project
+    1. Create a Oauth landing page and add your email as a test user
+    2. Enable the Smart device management API
+    3. Create an Oauth credential with the settings called from web server and https://www.google.com as the authorized redirect URI. Note the client ID and secret from this step.
+4. In https://console.nest.google.com/device-access create a new project and add oauth client ID from step 3.3
+5. Follow the series of queries in https://developers.google.com/nest/device-access/authorize to authorize devices
 
-You will need a Nest developer account, and a Product on the Nest developer portal to use this module:
+You should end up with the following pieces of information:
+* project-id - ID of the project you created in https://console.nest.google.com/device-access
+* oauth_client_id - value from setting up OAuth in https://console.cloud.google.com/ project
+* client_secret - value from setting up OAuth in https://console.cloud.google.com/ project
+* authorization_code - You get this value when you authorize your https://console.nest.google.com/device-access project to access your devices
+* access-token - Token used to make requests to https://smartdevicemanagement.googleapis.com
+* refresh-token - Used to get a new access-token when the old one expires
 
-1. Visit `Nest Developers <https://developers.nest.com/>`_, and sign in. Create an account if you don't have one already.
+Be careful as you follow along the guide in <https://developers.google.com/nest/device-access/get-started>, since you're dealing with so many similar accounts and keys it can be easy to mix something up and you won't get particularly useful errors.
 
-2. Fill in the account details:
-
-  - The "Company Information" can be anything.
-
-3. Submit changes.
-
-4. Click "`Products <https://developers.nest.com/products>`_" at top of page.
-
-5. Click "`Create New Product <https://developers.nest.com/products/new>`_"
-
-6. Fill in details:
-
-  - Product name must be unique.
-
-  - The description, users, urls can all be anything you want.
-
-7. For permissions, check every box and if it's an option select the read/write option.
-
-  - The description requires a specific format to be accepted.
-
-8. Click "Create Product".
-
-9. Once the new product page opens the "Product ID" and "Product Secret" are located on the right side. These will be used as client_id and client_secret below.
+## Usage
 
 
-Usage
-=====
-
-Migrate to 4.x
---------------
-The version 4.x uses `Nest Stream API <https://developers.nest.com/documentation/cloud/rest-streaming-guide>`_, so that you can get nearly real time status update of your Nest devices.
 
 If you use python-nest as a command line tool:
     You don't need to change, but there is a new command line option ``--keep-alive`` you can give a try.
@@ -303,6 +287,6 @@ The ``[NEST]`` section may also be named ``[nest]`` for convenience. Do not use 
 
 History
 =======
-
-This module was originally a fork of `nest_thermostat <https://github.com/FiloSottile/nest_thermostat>`_
+This module was originally a fork of `python-nest <https://github.com/jkoelker/python-nest>`_
+which was a fork of `nest_thermostat <https://github.com/FiloSottile/nest_thermostat>`_
 which was a fork of `pynest <https://github.com/smbaker/pynest>`_
