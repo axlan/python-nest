@@ -27,11 +27,8 @@ API_URL = 'https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_
 REDIRECT_URI = 'https://www.google.com'
 SCOPE = ['https://www.googleapis.com/auth/sdm.service']
 
-STRUCTURES = 'structures'
-THERMOSTAT_TYPE = 'sdm.devices.types.THERMOSTAT'
-DOORBELL_TYPE = 'sdm.devices.types.DOORBELL'
-
 _LOGGER = logging.getLogger(__name__)
+
 
 class APIError(Exception):
     def __init__(self, response, msg=None):
@@ -87,103 +84,73 @@ class AuthorizationError(Exception):
 
         self.response = response
 
-class NestBase(object):
-    def __init__(self, name, nest_api):
+
+class Device():
+
+    def __init__(self, nest_api=None, name=None, device_data=None):
         self._name = name
         self._nest_api = nest_api
+        self._device_data = device_data
 
     def __str__(self):
-        return '<%s: %s>' % (self.__class__.__name__, self._repr_name)
-
-    def _set(self, data):
-        path = f'/{self.name}:executeCommand'
-
-        response = self._nest_api._put(path=path, data=data)
-
-        return response
+        trait_str = ','.join([f'<{k}: {v}>' for k, v in self.traits.items()])
+        return f'name: {self.name} where:{self.where} - {self.type}({trait_str})'
 
     @property
     def name(self):
-        return self._name
+        if self._device_data is not None:
+            return self._device_data['name']
+        else:
+            return self._name.split('/')[-1]
 
-    @property
-    def _repr_name(self):
-        return self.name
-
-
-class Device(NestBase):
     @property
     def _device(self):
-        return next(device for device in self._devices if device['name'] == self.name)
+        if self._device_data is not None:
+            return self._device_data
+        else:
+            return next(device for device in self._devices if self.name in device['name'])
 
     @property
     def _devices(self):
+        if self._device_data is not None:
+            raise RuntimeError("Invalid use of singular device")
         return self._nest_api._devices
-
-    @property
-    def _repr_name(self):
-        if self.name:
-            return self.name
-
-        return self.where
-
-    def __repr__(self):
-        return str(self._device)
 
     @property
     def where(self):
         return self._device['parentRelations'][0]['displayName']
 
-
-class Thermostat(Device):
-    #TODO: Fill in rest from https://developers.google.com/nest/device-access/traits/device/thermostat-eco
+    @property
+    def type(self):
+        return self._device['type'].split('.')[-1]
 
     @property
-    def humidity(self):
-        return self._device['traits']['sdm.devices.traits.Humidity']['ambientHumidityPercent']
+    def traits(self):
+        return {k.split('.')[-1]: v for k, v in self._device['traits'].items()}
 
     @property
-    def mode(self):
-        return self._device['traits']['sdm.devices.traits.ThermostatMode']['mode']
+    def traits(self):
+        return {k.split('.')[-1]: v for k, v in self._device['traits'].items()}
 
-    @property
-    def temperature_scale(self):
-        return self._device['traits']['sdm.devices.traits.Settings']['temperatureScale']
+    def send_cmd(self, cmd, params):
+        cmd = '.'.join(cmd.split('.')[-2:])
+        path = f'/{self.name}:executeCommand'
+        data = {
+            "command": "sdm.devices.commands." + cmd,
+            'params': params
+        }
+        response = self._nest_api._put(path=path, data=data)
+        return response
 
-    @property
-    def temperature(self):
-        return self._device['traits']['sdm.devices.traits.Temperature']['ambientTemperatureCelsius']
+    @staticmethod
+    def filter_for_trait(devices, trait):
+        trait = trait.split('.')[-1]
+        return [device for device in devices if trait in device.traits]
 
-    @property
-    def hvac_state(self):
-        return self._device['traits']['sdm.devices.traits.ThermostatHvac']['status']
-
-    @property
-    def heat_setpoint(self):
-        return self._device['traits']['sdm.devices.traits.ThermostatTemperatureSetpoint']['heatCelsius']
-
-    @heat_setpoint.setter
-    def heat_setpoint(self, value):
-        self._set({
-                    "command" : "sdm.devices.commands.ThermostatMode.SetHeat",
-                    "params" : {
-                        "heatCelsius" : value
-                    }
-                })
-
-    def __str__(self):
-        fields = ['name', 'where', 'temperature', 'humidity', 'heat_setpoint', 'hvac_state']
-        properties = ' '.join([f'{field}={getattr(self, field)}' for field in fields])
-        return f'Thermostat({properties})'
-
-
-class Doorbell(Device):
-    #TODO: Fill in rest from https://developers.google.com/nest/device-access/traits/device/camera-event-image
-
-    def __str__(self):
-        fields = ['name', 'where']
-        properties = ' '.join([f'{field}={getattr(self, field)}' for field in fields])
-        return f'Doorbell({properties})'
+    @staticmethod
+    def filter_for_cmd(devices, cmd):
+        trait = cmd.split('.')[-2]
+        return Device.filter_for_trait(devices, trait)
 
 
 class Nest(object):
@@ -204,14 +171,14 @@ class Nest(object):
         self._devices_value = {}
 
         if not access_token:
-                try:
-                    with open(self._access_token_cache_file, 'r') as fd:
-                        access_token = json.load(fd)
-                        _LOGGER.debug("Loaded access token from %s",
-                                self._access_token_cache_file)
-                except:
-                    _LOGGER.warn("Token load failed from %s",
-                                self._access_token_cache_file)
+            try:
+                with open(self._access_token_cache_file, 'r') as fd:
+                    access_token = json.load(fd)
+                    _LOGGER.debug("Loaded access token from %s",
+                                  self._access_token_cache_file)
+            except:
+                _LOGGER.warn("Token load failed from %s",
+                             self._access_token_cache_file)
         if access_token:
             self._client = OAuth2Session(self._client_id, token=access_token)
 
@@ -219,12 +186,13 @@ class Nest(object):
         with open(self._access_token_cache_file, 'w') as fd:
             json.dump(token, fd)
             _LOGGER.debug("Save access token to %s",
-                              self._access_token_cache_file)
+                          self._access_token_cache_file)
 
     def __reauthorize(self):
         if self._reautherize_callback is None:
             raise AuthorizationError(None, 'No callback to handle OAuth URL')
-        self._client = OAuth2Session(self._client_id, redirect_uri=REDIRECT_URI, scope=SCOPE)
+        self._client = OAuth2Session(
+            self._client_id, redirect_uri=REDIRECT_URI, scope=SCOPE)
 
         authorization_url, state = self._client.authorization_url(
             AUTHORIZE_URL.format(project_id=self._project_id),
@@ -252,8 +220,8 @@ class Nest(object):
                 try:
                     _LOGGER.debug(">> %s %s", verb, url)
                     r = self._client.request(verb, url,
-                                         allow_redirects=False,
-                                         data=data)
+                                             allow_redirects=False,
+                                             data=data)
                     _LOGGER.debug(f"<< {r.status_code}")
                     if r.status_code == 200:
                         return r.json()
@@ -267,13 +235,15 @@ class Nest(object):
                         'client_secret': self._client_secret,
                     }
                     _LOGGER.debug(">> refreshing token")
-                    token = self._client.refresh_token(ACCESS_TOKEN_URL, **extra)
+                    token = self._client.refresh_token(
+                        ACCESS_TOKEN_URL, **extra)
                     self.__save_token(token)
                     if attempt > 1:
-                        raise AuthorizationError(None, 'Repeated TokenExpiredError')
+                        raise AuthorizationError(
+                            None, 'Repeated TokenExpiredError')
                     continue
             self.__reauthorize()
-    
+
     def _put(self, path, data=None):
         pieces = path.split('/')
         path = '/' + pieces[-1]
@@ -295,26 +265,15 @@ class Nest(object):
                               " %s", error)
         return self._devices_value
 
-    def thermostats(self, where=None):
-        names = [ device['name'] for device in 
-            self._devices if device['type'] == THERMOSTAT_TYPE and (where is None or device['parentRelations'][0]['displayName'] in where)
-        ]
-        return [Thermostat(name, self) for name in names]
-
-    def doorbells(self, where=None):
-        names = [ device['name'] for device in 
-            self._devices if device['type'] == DOORBELL_TYPE and (where is None or device['parentRelations'][0]['displayName'] in where)
-        ]
-        return [Doorbell(name, self) for name in names]
-
-    def get_devices(self, names=None, where=None):
+    def get_devices(self, names=None, wheres=None, types=None):
         ret = []
         for device in self._devices:
-            if (names is None or device['name'] in names) and (where is None or device['parentRelations'][0]['displayName'] in where):
-                ret.append({
-                    THERMOSTAT_TYPE: Thermostat,
-                    DOORBELL_TYPE: Doorbell
-                }[device['type']](device['name'], self))
+            obj = Device(device_data=device)
+            name_match = (names is None or obj.name in names)
+            where_match = (wheres is None or obj.where in wheres)
+            type_match = (types is None or obj.type in types)
+            if name_match and where_match and type_match:
+                ret.append(Device(nest_api=self, name=obj.name))
         return ret
 
     def __enter__(self):

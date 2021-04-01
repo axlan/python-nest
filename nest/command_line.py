@@ -14,9 +14,9 @@ import os
 import time
 import sys
 import errno
+import json
 
 from . import nest
-from . import utils
 from . import helpers
 
 # use six for python2/python3 compatibility
@@ -63,9 +63,6 @@ def get_parser():
                         help='keep showing update received from stream API '
                              'in show and camera-show commands')
 
-    parser.add_argument('-c', '--celsius', dest='celsius', action='store_true',
-                        help='use celsius instead of farenheit')
-
     parser.add_argument('-n', '--name', dest='name',
                         help='optional, specify name of nest '
                              'thermostat to talk to')
@@ -84,23 +81,26 @@ def get_parser():
 
     subparsers = parser.add_subparsers(dest='command',
                                        help='command help')
-    temp = subparsers.add_parser('temp', help='show/set temperature')
+    show_trait = subparsers.add_parser('show_trait', help='show a trait')
+    show_trait.add_argument('trait_name',
+                            help='name of trait to show')
 
-    temp.add_argument('temperature', nargs='*', type=float,
-                      help='target temperature to set device to')
-
-    subparsers.add_parser('target', help='show current temp target')
-    subparsers.add_parser('humid', help='show current humidity')
+    cmd = subparsers.add_parser('cmd', help='send a cmd')
+    cmd.add_argument('cmd_name',
+                     help='name of cmd to send')
+    cmd.add_argument('cmd_params',
+                     help='json for cmd params')
 
     subparsers.add_parser('show', help='show everything')
-
 
     parser.set_defaults(**defaults)
     return parser
 
+
 def reautherize_callback(authorization_url):
-        print('Please go to %s and authorize access.' % authorization_url)
-        return input('Enter the full callback URL: ')
+    print('Please go to %s and authorize access.' % authorization_url)
+    return input('Enter the full callback URL: ')
+
 
 def main():
     parser = get_parser()
@@ -111,8 +111,8 @@ def main():
         logger.setLevel(logging.DEBUG)
         console_handler = logging.StreamHandler()
         formatter = logging.Formatter(
-           "%(asctime)s %(levelname)s (%(threadName)s) "
-           "[%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+            "%(asctime)s %(levelname)s (%(threadName)s) "
+            "[%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         console_handler.setFormatter(formatter)
         console_handler.setLevel(logging.DEBUG)
         logger.addHandler(console_handler)
@@ -158,7 +158,7 @@ def main():
                    reautherize_callback=reautherize_callback) as napi:
 
         if args.name:
-            devices = napi.get_devices([args.name])
+            devices = napi.get_devices(args.name)
 
         elif args.structure:
             devices = napi.get_devices(None, args.structure)
@@ -166,24 +166,13 @@ def main():
         else:
             devices = napi.get_devices()
 
-
-        if not args.celsius:
-            display_temp = utils.c_to_f
-
-        if cmd == 'temp':
-            if args.temperature:
-                devices[args.index].heat_setpoint = args.temperature[0]
-
-            print('%0.1f' % display_temp(devices[args.index].temperature))
-
-        elif cmd == 'humid':
-            print(devices[args.index].humidity)
-
-        elif cmd == 'target':
-            target = devices[args.index].heat_setpoint
-
-            print('%0.1f' % display_temp(target))
-
+        if cmd == 'show_trait':
+            devices = nest.Device.filter_for_trait(devices, args.trait_name)
+            print(devices[args.index].traits[args.trait_name])
+        elif cmd == 'cmd':
+            devices = nest.Device.filter_for_cmd(devices, args.cmd_name)
+            print(devices[args.index].send_cmd(
+                args.cmd_name, json.loads(args.cmd_params)))
         elif cmd == 'show':
             try:
                 while True:
@@ -195,6 +184,7 @@ def main():
                     time.sleep(2)
             except KeyboardInterrupt:
                 return
+
 
 if __name__ == '__main__':
     main()
