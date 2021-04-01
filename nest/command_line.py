@@ -11,6 +11,7 @@ import argparse
 import datetime
 import logging
 import os
+import time
 import sys
 import errno
 
@@ -65,8 +66,8 @@ def get_parser():
     parser.add_argument('-c', '--celsius', dest='celsius', action='store_true',
                         help='use celsius instead of farenheit')
 
-    parser.add_argument('-s', '--serial', dest='serial',
-                        help='optional, specify serial number of nest '
+    parser.add_argument('-n', '--name', dest='name',
+                        help='optional, specify name of nest '
                              'thermostat to talk to')
 
     parser.add_argument('-S', '--structure', dest='structure',
@@ -88,216 +89,14 @@ def get_parser():
     temp.add_argument('temperature', nargs='*', type=float,
                       help='target temperature to set device to')
 
-    fan = subparsers.add_parser('fan', help='set fan "on" or "auto"')
-    fan_group = fan.add_mutually_exclusive_group()
-    fan_group.add_argument('--auto', action='store_true', default=False,
-                           help='set fan to auto')
-    fan_group.add_argument('--on', action='store_true', default=False,
-                           help='set fan to on')
-
-    mode = subparsers.add_parser('mode', help='show/set current mode')
-    mode_group = mode.add_mutually_exclusive_group()
-    mode_group.add_argument('--cool', action='store_true', default=False,
-                            help='set mode to cool')
-    mode_group.add_argument('--heat', action='store_true', default=False,
-                            help='set mode to heat')
-    mode_group.add_argument('--eco', action='store_true', default=False,
-                            help='set mode to eco')
-    mode_group.add_argument('--range', action='store_true', default=False,
-                            help='set mode to range')
-    mode_group.add_argument('--off', action='store_true', default=False,
-                            help='set mode to off')
-
-    away = subparsers.add_parser('away', help='show/set current away status')
-    away_group = away.add_mutually_exclusive_group()
-    away_group.add_argument('--away', action='store_true', default=False,
-                            help='set away status to "away"')
-    away_group.add_argument('--home', action='store_true', default=False,
-                            help='set away status to "home"')
-    eta_group = away.add_argument_group()
-    eta_group.add_argument('--trip', dest='trip_id', help='trip information')
-    eta_group.add_argument('--eta', dest='eta', type=int,
-                           help='estimated arrival time from now, in minutes')
-
     subparsers.add_parser('target', help='show current temp target')
     subparsers.add_parser('humid', help='show current humidity')
 
-    target_hum = subparsers.add_parser('target_hum',
-                                       help='show/set target humidty')
-    target_hum.add_argument('humidity', nargs='*',
-                            help='specify target humidity value or auto '
-                                 'to auto-select a humidity based on outside '
-                                 'temp')
-
     subparsers.add_parser('show', help='show everything')
 
-    # Camera parsers
-    subparsers.add_parser('camera-show',
-                          help='show everything (for cameras)')
-    cam_streaming = subparsers.add_parser('camera-streaming',
-                                          help='show/set camera streaming')
-    camera_streaming_group = cam_streaming.add_mutually_exclusive_group()
-    camera_streaming_group.add_argument('--enable-camera-streaming',
-                                        action='store_true', default=False,
-                                        help='Enable camera streaming')
-    camera_streaming_group.add_argument('--disable-camera-streaming',
-                                        action='store_true', default=False,
-                                        help='Disable camera streaming')
-
-    # Protect parsers
-    subparsers.add_parser('protect-show',
-                          help='show everything (for Nest Protect)')
 
     parser.set_defaults(**defaults)
     return parser
-
-
-def get_structure(napi, args):
-    if args.structure:
-        struct = [s for s in napi.structures if s.name == args.structure]
-        if struct:
-            return struct[0]
-    return napi.structures[0]
-
-
-def get_camera(napi, args, structure):
-    if args.serial:
-        return nest.Camera(args.serial, napi)
-    else:
-        return structure.cameras[args.index]
-
-
-def get_smoke_co_alarm(napi, args, structure):
-    if args.serial:
-        return nest.SmokeCoAlarm(args.serial, napi)
-    else:
-        return structure.smoke_co_alarms[args.index]
-
-
-def handle_camera_show(device, print_prompt, print_meta_data=True):
-    if print_meta_data:
-        print('Device                : %s' % device.name)
-        # print('Model               : %s' % device.model) # Doesn't work
-        print('Serial                : %s' % device.serial)
-        print('Where                 : %s' % device.where)
-        print('Where ID              : %s' % device.where_id)
-        print('Video History Enabled : %s' % device.is_video_history_enabled)
-        print('Audio Enabled         : %s' % device.is_audio_enabled)
-        print('Public Share Enabled  : %s' % device.is_public_share_enabled)
-        print('Snapshot URL          : %s' % device.snapshot_url)
-        print('Nest Web App URL      : %s' % device.web_url)
-
-    print('Away                  : %s' % device.structure.away)
-    print('Sound Detected        : %s' % device.sound_detected)
-    print('Motion Detected       : %s' % device.motion_detected)
-    print('Person Detected       : %s' % device.person_detected)
-    print('Streaming             : %s' % device.is_streaming)
-    if device.structure.security_state is not None:
-        print('Security State        : %s' % device.structure.security_state)
-
-    if print_prompt:
-        print('Press Ctrl+C to EXIT')
-
-
-def handle_camera_streaming(device, args):
-    if args.disable_camera_streaming:
-        device.is_streaming = False
-    elif args.enable_camera_streaming:
-        device.is_streaming = True
-
-    print('Streaming : %s' % device.is_streaming)
-
-
-def handle_camera_commands(napi, args):
-    structure = get_structure(napi, args)
-    device = get_camera(napi, args, structure)
-    if args.command == "camera-show":
-        handle_camera_show(device, args.keep_alive)
-        if args.keep_alive:
-            try:
-                napi.update_event.clear()
-                while napi.update_event.wait():
-                    napi.update_event.clear()
-                    handle_camera_show(device, True, False)
-            except KeyboardInterrupt:
-                return
-    elif args.command == "camera-streaming":
-        handle_camera_streaming(device, args)
-
-
-def handle_protect_show(device, print_prompt, print_meta_data=True):
-    if print_meta_data:
-        print('Device                : %s' % device.name)
-        print('Serial                : %s' % device.serial)
-        print('Where                 : %s' % device.where)
-        print('Where ID              : %s' % device.where_id)
-
-    print('CO Status             : %s' % device.co_status)
-    print('Smoke Status          : %s' % device.smoke_status)
-    print('Battery Health        : %s' % device.battery_health)
-    print('Color Status          : %s' % device.color_status)
-
-    if print_prompt:
-        print('Press Ctrl+C to EXIT')
-
-
-def handle_protect_show_commands(napi, args):
-    structure = get_structure(napi, args)
-    device = get_smoke_co_alarm(napi, args, structure)
-    handle_protect_show(device, args.keep_alive)
-    if args.keep_alive:
-        try:
-            napi.update_event.clear()
-            while napi.update_event.wait():
-                napi.update_event.clear()
-                handle_protect_show(device, True, False)
-        except KeyboardInterrupt:
-            return
-
-
-def handle_show_commands(napi, device, display_temp, print_prompt,
-                         print_meta_data=True):
-    if print_meta_data:
-        # TODO should pad key? old code put : out 35
-        print('Device: %s' % device.name)
-        print('Where: %s' % device.where)
-        print('Can Heat              : %s' % device.can_heat)
-        print('Can Cool              : %s' % device.can_cool)
-        print('Has Humidifier        : %s' % device.has_humidifier)
-        print('Has Dehumidifier      : %s' % device.has_humidifier)
-        print('Has Fan               : %s' % device.has_fan)
-        print('Has Hot Water Control : %s' % device.has_hot_water_control)
-
-    print('Away                  : %s' % device.structure.away)
-    print('Mode                  : %s' % device.mode)
-    print('State                 : %s' % device.hvac_state)
-    if device.has_fan:
-        print('Fan                   : %s' % device.fan)
-        print('Fan Timer             : %s' % device.fan_timer)
-    if device.has_hot_water_control:
-        print('Hot Water Temp        : %s' % device.fan)
-    print('Temp                  : %0.1f%s' % (device.temperature,
-          device.temperature_scale))
-    helpers.print_if('Humidity              : %0.1f%%', device.humidity)
-    if isinstance(device.target, tuple):
-        print('Target                 : %0.1f-%0.1f%s' % (
-            display_temp(device.target[0]),
-            display_temp(device.target[1]),
-            device.temperature_scale))
-    else:
-        print('Target                : %0.1f%s' %
-              (display_temp(device.target), device.temperature_scale))
-
-    print('Away Heat             : %0.1f%s' %
-          (display_temp(device.eco_temperature[0]), device.temperature_scale))
-    print('Away Cool             : %0.1f%s' %
-          (display_temp(device.eco_temperature[1]), device.temperature_scale))
-
-    print('Has Leaf              : %s' % device.has_leaf)
-
-    if print_prompt:
-        print('Press Ctrl+C to EXIT')
-
 
 def reautherize_callback(authorization_url):
         print('Please go to %s and authorize access.' % authorization_url)
@@ -358,67 +157,14 @@ def main():
                    access_token_cache_file=token_cache,
                    reautherize_callback=reautherize_callback) as napi:
 
-        if cmd.startswith("camera"):
-            return handle_camera_commands(napi, args)
-
-        elif cmd == 'protect-show':
-            return handle_protect_show_commands(napi, args)
-
-        elif cmd == 'away':
-            structure = None
-
-            if args.structure:
-                struct = [s for s in napi.structures
-                          if s.name == args.structure]
-                if struct:
-                    structure = struct[0]
-
-            else:
-                if args.serial:
-                    serial = args.serial
-                else:
-                    serial = napi.thermostats[args.index]._serial
-
-                struct = [s for s in napi.structures for d in s.thermostats
-                          if d._serial == serial]
-                if struct:
-                    structure = struct[0]
-
-            if not structure:
-                structure = napi.structures[0]
-
-            if args.away:
-                structure.away = True
-                if args.eta:
-                    eta = datetime.datetime.utcnow() \
-                          + datetime.timedelta(minutes=args.eta)
-                    if args.trip_id is None:
-                        dt = datetime.datetime.utcnow()
-                        ts = (dt - datetime.datetime(1970, 1, 1)) \
-                            / datetime.timedelta(seconds=1)
-                        args.trip_id = "trip_{}".format(round(ts))
-                    print("Set ETA %s for trip %s" % (eta, args.trip_id))
-                    structure.set_eta(args.trip_id, eta)
-
-            elif args.home:
-                structure.away = False
-
-            print(structure.away)
-            return
-
-        if args.serial:
-            device = nest.Thermostat(args.serial, napi)
+        if args.name:
+            devices = napi.get_devices([args.name])
 
         elif args.structure:
-            struct = [s for s in napi.structures if s.name == args.structure]
-            if struct:
-                device = struct[0].thermostats[args.index]
-
-            else:
-                device = napi.structures[0].thermostats[args.index]
+            devices = napi.get_devices(None, args.structure)
 
         else:
-            device = napi.thermostats[args.index]
+            devices = napi.get_devices()
 
 
         if not args.celsius:
@@ -426,62 +172,29 @@ def main():
 
         if cmd == 'temp':
             if args.temperature:
-                device.heat_setpoint = args.temperature[0]
+                devices[args.index].heat_setpoint = args.temperature[0]
 
-            print('%0.1f' % display_temp(device.temperature))
-
-        elif cmd == 'fan':
-            if args.auto:
-                device.fan = False
-
-            elif args.on:
-                device.fan = True
-
-            print(device.fan)
-
-        elif cmd == 'mode':
-            if args.cool:
-                device.mode = 'cool'
-
-            elif args.heat:
-                device.mode = 'heat'
-
-            elif args.eco:
-                device.mode = 'eco'
-
-            elif args.range:
-                device.mode = 'range'
-
-            elif args.off:
-                device.mode = 'off'
-
-            print(device.mode)
+            print('%0.1f' % display_temp(devices[args.index].temperature))
 
         elif cmd == 'humid':
-            print(device.humidity)
+            print(devices[args.index].humidity)
 
         elif cmd == 'target':
-            target = device.target
+            target = devices[args.index].heat_setpoint
 
-            if isinstance(target, tuple):
-                print('Lower: %0.1f' % display_temp(target[0]))
-                print('Upper: %0.1f' % display_temp(target[1]))
-
-            else:
-                print('%0.1f' % display_temp(target))
+            print('%0.1f' % display_temp(target))
 
         elif cmd == 'show':
-            handle_show_commands(napi, device, display_temp, args.keep_alive)
-            if args.keep_alive:
-                try:
-                    napi.update_event.clear()
-                    while napi.update_event.wait():
-                        napi.update_event.clear()
-                        handle_show_commands(napi, device, display_temp,
-                                             True, False)
-                except KeyboardInterrupt:
-                    return
-
+            try:
+                while True:
+                    for device in devices:
+                        print(device)
+                    print('=========================================')
+                    if not args.keep_alive:
+                        break
+                    time.sleep(2)
+            except KeyboardInterrupt:
+                return
 
 if __name__ == '__main__':
     main()
