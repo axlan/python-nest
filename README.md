@@ -4,9 +4,13 @@
 
 ## Installation
 
+This library does not support Python2
+
 ```bash
     [sudo] pip install python-google-nest
 ```
+
+In addition to the Python library it also adds a CLI tool `nest` that is documented [below](#command-line)
 
 ## Google Device Access Registration
 
@@ -48,10 +52,17 @@ This will be cached and for however long the token is valid the library will kee
 
 ## Usage
 
+At a high level this library is used to get references to the devices included in the account. These references can be sent commands, and have a list of "traits". See <https://developers.google.com/nest/device-access/traits> for details on these traits and commands.
+
+See docstring comments in <https://github.com/axlan/python-nest/blob/master/nest/nest.py> for details on the usage of this library.
+
+Example:
+
 ```python
 # reautherize_callback should be set to a function with the signature
-# Callable[[str], str]] where the user can go to the url and enter the
-# result
+# Callable[[str], str]] it will be called if the user needs to reautherize
+# the OAuth tokens. It will be passed the URL to go to, and need to have
+# the resulting URL after authentication returned.
 
 with nest.Nest(client_id, client_secret
                ,project_id,
@@ -61,6 +72,9 @@ with nest.Nest(client_id, client_secret
 
     # Will trigger initial auth and fetch of data
     devices = napi.get_devices(args.name, args.structure)
+
+    # For a list of traits and commands see:
+    # https://developers.google.com/nest/device-access/traits
 
     if cmd == 'show_trait':
         # will reuse the cached result unless cache_period has elapsed
@@ -88,7 +102,7 @@ with nest.Nest(client_id, client_secret
             return
 ```
 
-### Command line
+### Command Line
 
 ```bash
 usage: nest [-h] [--conf FILE] [--token-cache TOKEN_CACHE_FILE] [-t TOKEN] [--client-id ID] [--client-secret SECRET] [--project-id PROJECT] [-k] [-n NAME] [-S STRUCTURE] [-i INDEX] [-v] {show_trait,cmd,show} ...
@@ -159,7 +173,7 @@ A configuration file may be specified and used for the credentials to communicat
     [NEST]
     client_id = your_client_id
     client_secret = your_client_secret
-    project_id = 966ffcc9-3cf8-4499-b066-3cc3c0f8d1d3
+    project_id = your_project_id
     token_cache = ~/.config/nest/token_cache
 ```
 
@@ -170,7 +184,8 @@ The `[NEST]` section may also be named `[nest]` for convenience. Do not use `[DE
 There are two main parts of this API that are not implemented.
 
 1. This library does not handle the Device Access event Pub/Sub system <https://developers.google.com/nest/device-access/subscribe-to-events>. Using these would avoid needing to poll the API.
-2. This library does not currently handle getting video/images from the cameras. This should be possible to implement on top of this library, but would require setting up a RTSP client, or the logic to follow the links in the events.
+2. This library does not currently handle getting video/images from the cameras. This should be possible to implement on top of this library, but would require setting up a RTSP client, or the logic to follow the links in the camera events.
+3. Google provides libraries to discover the details of an API and generate code <https://developers.google.com/nest/device-access/reference/rest>. I took a look at this process, and it didn't seem like it wouldn't make a good fit for a simple library like this.
 
 History
 =======

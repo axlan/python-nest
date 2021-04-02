@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 
 import io
@@ -6,12 +6,11 @@ import io
 from setuptools import setup
 
 
-# NOTE(jkoelker) Subjective guidelines for Major.Minor.Micro ;)
 #                Bumping Major means an API contract change.
 #                Bumping Minor means API bugfix or new functionality.
 #                Bumping Micro means CLI change of any kind unless it is
 #                    significant enough to warrant a minor/major bump.
-version = '5.0.0'
+version = '5.0.1'
 
 
 setup(name='python-google-nest',
@@ -24,8 +23,17 @@ setup(name='python-google-nest',
       author='Jonathan Diamond',
       author_email='feros32@gmail.com',
       url='https://github.com/axlan/python-nest/',
+      classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: Creative Commons Attribution-NonCommercial-ShareAlike 3.0",
+        "Operating System :: OS Independent",
+      ],
+      python_requires=">=3.6",
       packages=['nest'],
-      install_requires=['requests_oauthlib'],
+      install_requires=[
+          # Tested with requests_oauthlib==1.3.0
+          'requests_oauthlib'
+        ],
       entry_points={
           'console_scripts': ['nest=nest.command_line:main'],
       }
