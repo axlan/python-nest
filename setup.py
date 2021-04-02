@@ -25,7 +25,6 @@ setup(name='python-google-nest',
       url='https://github.com/axlan/python-nest/',
       classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: Creative Commons Attribution-NonCommercial-ShareAlike 3.0",
         "Operating System :: OS Independent",
       ],
       python_requires=">=3.6",
