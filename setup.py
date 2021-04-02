@@ -18,6 +18,7 @@ setup(name='python-google-nest',
       version=version,
       description='Python API and command line tool for talking to the '
                   'Nest™ Thermostat through new Google API',
+      long_description_content_type="text/markdown",
       long_description=io.open('README.md', encoding='UTF-8').read(),
       keywords='nest thermostat',
       author='Jonathan Diamond',
