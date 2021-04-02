@@ -174,6 +174,6 @@ There are two main parts of this API that are not implemented.
 
 History
 =======
-This module was originally a fork of `python-nest <https://github.com/jkoelker/python-nest>`_
-which was a fork of `nest_thermostat <https://github.com/FiloSottile/nest_thermostat>`_
-which was a fork of `pynest <https://github.com/smbaker/pynest>`_
+This module is a fork of [python-nest](https://github.com/jkoelker/python-nest)
+which was a fork of [nest_thermostat](https://github.com/FiloSottile/nest_thermostat)
+which was a fork of [pynest](https://github.com/smbaker/pynest)
