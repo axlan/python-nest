@@ -24,10 +24,7 @@ setup(name='python-google-nest',
       author_email='feros32@gmail.com',
       url='https://github.com/axlan/python-nest/',
       packages=['nest'],
-      install_requires=['requests>=1.0.0',
-                        'six>=1.10.0',
-                        'sseclient-py',
-                        'python-dateutil'],
+      install_requires=['requests_oauthlib'],
       entry_points={
           'console_scripts': ['nest=nest.command_line:main'],
       }

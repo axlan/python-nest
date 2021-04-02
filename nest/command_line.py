@@ -19,9 +19,6 @@ import json
 from . import nest
 from . import helpers
 
-# use six for python2/python3 compatibility
-from six.moves import input
-
 
 def get_parser():
     # Get Executable name
@@ -57,6 +54,9 @@ def get_parser():
 
     parser.add_argument('--client-secret', dest='client_secret',
                         help='product secret for nest.com', metavar='SECRET')
+
+    parser.add_argument('--project-id', dest='project_id',
+                        help='device access project id', metavar='PROJECT')
 
     parser.add_argument('-k', '--keep-alive', dest='keep_alive',
                         action='store_true',
@@ -143,13 +143,12 @@ def main():
 
     token_cache = os.path.expanduser(args.token_cache)
 
-    if not os.path.exists(token_cache):
-        if args.client_id is None or args.client_secret is None:
-            print("Missing client and secret. If using a configuration file,"
-                  " ensure that it is formatted properly, with a section "
-                  "titled as per the documentation-otherwise, call with "
-                  "--client-id and --client-secret.")
-            return
+    if args.client_id is None or args.client_secret is None or args.project_id is None:
+        print("Missing client_id, project_id or client_secret. If using a "
+              "configuration file, ensure that it is formatted properly, with "
+              "a section titled as per the documentation-otherwise, call with "
+              "--client-id and --client-secret.")
+        return
 
     with nest.Nest(project_id=args.project_id, client_id=args.client_id,
                    client_secret=args.client_secret,
@@ -157,14 +156,7 @@ def main():
                    access_token_cache_file=token_cache,
                    reautherize_callback=reautherize_callback) as napi:
 
-        if args.name:
-            devices = napi.get_devices(args.name)
-
-        elif args.structure:
-            devices = napi.get_devices(None, args.structure)
-
-        else:
-            devices = napi.get_devices()
+        devices = napi.get_devices(args.name, args.structure)
 
         if cmd == 'show_trait':
             devices = nest.Device.filter_for_trait(devices, args.trait_name)
