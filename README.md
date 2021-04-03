@@ -2,6 +2,8 @@
 
 **NOTE: This library support the new (post 2020) API provided by Google which replaced the original Nest Developers API.**
 
+For a write up on developing this library see: <https://www.robopenguins.com/nest/>
+
 ## Installation
 
 This library does not support Python2
