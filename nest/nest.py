@@ -285,13 +285,8 @@ class Nest(object):
     def _devices(self):
         if time.time() > self._last_update + self._cache_period:
             with self._lock:
-                try:
-                    self._devices_value = self._request('GET', '')['devices']
-                    self._last_update = time.time()
-                except Exception as error:
-                    # other error still set update_event to trigger retry
-                    _LOGGER.debug("Exception occurred in processing stream:"
-                                  " %s", error)
+                self._devices_value = self._request('GET', '')['devices']
+                self._last_update = time.time()
         return self._devices_value
 
     def get_devices(self, names: Optional[List[str]] = None,
