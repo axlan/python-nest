@@ -22,7 +22,7 @@ def get_config(config_path=None, prog='nest'):
 
     # Note, this cannot accept sections titled 'DEFAULT'
     if os.path.exists(config_file):
-        config = configparser.SafeConfigParser()
+        config = configparser.ConfigParser()
         config.read([config_file])
         if config.has_section('nest'):
             defaults.update(dict(config.items('nest')))

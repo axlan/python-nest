@@ -10,7 +10,7 @@ from setuptools import setup
 #                Bumping Minor means API bugfix or new functionality.
 #                Bumping Micro means CLI change of any kind unless it is
 #                    significant enough to warrant a minor/major bump.
-version = '5.1.1'
+version = '5.2.0'
 
 
 setup(name='python-google-nest',
